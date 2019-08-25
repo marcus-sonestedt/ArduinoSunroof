@@ -1,8 +1,8 @@
 const auto GoOutPin = 2;
 const auto GoInPin = 4;
 
-const auto LimOutPin = 6;
-const auto LimInPin = 7;
+const auto LimOutPin = 5;
+const auto LimInPin = 6;
 
 const auto MotorOutPlusPin = 8;
 const auto MotorInPlusPin = 9;
@@ -12,31 +12,6 @@ const auto MotorInNegPin = 11;
 const auto ExtLedPin = 3;
 const auto LedPin = 13;
 
-void setPwmFrequency(int pin, int divider);
-
-void setup() {
-  // put your setup code here, to run once:
-
-  pinMode(GoOutPin, INPUT_PULLUP);
-  pinMode(GoInPin, INPUT_PULLUP);
-
-  pinMode(MotorOutPlusPin, OUTPUT);
-  pinMode(MotorInPlusPin, OUTPUT);
-  pinMode(MotorOutNegPin, OUTPUT);
-  pinMode(MotorInNegPin, OUTPUT);
-
-  setPwmFrequency(MotorOutNegPin, 1);
-  setPwmFrequency(MotorInNegPin, 1);
-
-  pinMode(LedPin, OUTPUT);
-  pinMode(ExtLedPin, OUTPUT);
-
-  Serial.begin(115200);
-}
-
-bool prevOut = LOW;
-bool prevIn = LOW;
-auto blinkHz = 0.1f;
 
 class DebouncedInput
 {
@@ -63,39 +38,55 @@ class DebouncedInput
   bool _actualValue = false;
 };
 
-DebouncedInput goInDebouncer(GoInPin), goOutDebouncer(GoOutPin);
+void setPwmFrequency(int pin, int divider);
 
+// state
+DebouncedInput goInDebouncer(GoInPin), goOutDebouncer(GoOutPin);
 int pwm = 0;
 int targetPwm = 0;
+auto blinkHz = 0.1f;
+
+void setup() {
+  pinMode(GoOutPin, INPUT_PULLUP);
+  pinMode(GoInPin, INPUT_PULLUP);
+
+  pinMode(LimitOutPin, INPUT);
+  pinMode(LimitInPin, INPUT);
+
+  pinMode(MotorOutPlusPin, OUTPUT);
+  pinMode(MotorInPlusPin, OUTPUT);
+  pinMode(MotorOutNegPin, OUTPUT);
+  pinMode(MotorInNegPin, OUTPUT);
+
+  setPwmFrequency(MotorOutNegPin, 1);
+  setPwmFrequency(MotorInNegPin, 1);
+
+  pinMode(LedPin, OUTPUT);
+  pinMode(ExtLedPin, OUTPUT);
+
+  Serial.begin(115200);
+}
 
 void loop() {
-  // put your main code here, to run repeatedly:
-
   auto goOut = !goInDebouncer;
   auto goIn = !goOutDebouncer;
 
   auto limitOut = digitalRead(LimOutPin) == HIGH;
   auto limitIn = digitalRead(LimInPin) == HIGH;
 
+  if ((limitIn || limitOut) && (goIn || goOut)) {
+    blinkHz = 10.0f;
+  } else if (goOut) {       
+    blinkHz = 1.0f;
+  } else if (goIn) {
+    blinkHz = 3.0f;
+  } else {
+    blinkHz = 0.2f;
+  } 
+  
   goOut &= !limitOut;
   goIn &= !limitIn;
-
-  if (prevOut != goOut || prevIn != goIn) {
-    if (goOut) {       
-      blinkHz = 1.0f;
-    } else if (goIn) {
-      blinkHz = 3.0f;
-    } else {
-      blinkHz = 0.1f;
-    }
-    
-    prevOut = goOut;
-    prevIn = goIn;
-  }
-
-  if (limitIn || limitOut)
-    blinkHz = 10.0f;
-
+ 
   if (goOut == goIn) {
     targetPwm = 0;  
   } else if (goOut) {
@@ -104,7 +95,17 @@ void loop() {
     targetPwm = -255;
   }
 
-  int actualPwm = abs(pow(pwm, 3) / pow(256, 2));
+  if (pwm != targetPwm)
+  {
+    auto pwmDelta = (limitIn || limitOut) ? 5 : 1;
+    pwm += (pwm < targetPwm) ? pwmDelta : -pwmDelta;
+  }
+
+  if (abs(pwm) < 16 && targetPwm == 0)
+    pwm = 0;
+
+
+  auto actualPwm = abs(pow(pwm, 3) / pow(256, 2));
 
   if (pwm == 0)
   {
@@ -128,17 +129,9 @@ void loop() {
     digitalWrite(MotorInNegPin, LOW);         
   }
 
-  if (pwm != targetPwm)
-  {
-    if (pwm < targetPwm)
-      pwm++;
-    else
-      pwm--;
-  }
-
-  auto blinkValue = int((cos(micros() * 1e-6f * blinkHz * 3.14f * 2) + 1) * 128);
-  //digitalWrite(LedPin, blinkValue > 200 ? HIGH : LOW);
-  analogWrite(ExtLedPin, blinkValue * blinkValue / (blinkHz > 1 ? 255.0f : 128.0f));
+  auto blinkValue = int((cos(micros() * 1e-6f * blinkHz * 3.14f * 2) + 1) * (blinkHz < 1 ? 25 : 100)) + 25;
+  digitalWrite(LedPin, blinkValue > 200 ? HIGH : LOW);
+  analogWrite(ExtLedPin, blinkValue * blinkValue / (256.0f));
 
   delay(10);
 }
